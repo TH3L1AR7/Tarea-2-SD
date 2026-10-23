@@ -1,0 +1,21 @@
+{
+  "_comment": "slug e id confirmados navegando cl.soccerway.com (2026-09-01). URL real de equipo: /equipo/{slug}/{id}/",
+  "teams": [
+    {"code": "udechile",    "name": "U. De Chile",     "slug": "u-de-chile",     "id": "xW771C6U"},
+    {"code": "colocolo",    "name": "Colo Colo",       "slug": "colo-colo",      "id": "th4HPIws"},
+    {"code": "coquimbo",    "name": "Coquimbo",        "slug": "coquimbo",       "id": "hWejMZ6h"},
+    {"code": "udeconce",    "name": "U. De Concepción","slug": "u-de-concepcion","id": "6BcMMext"},
+    {"code": "limache",     "name": "Limache",         "slug": "limache",        "id": "YPTUuyqJ"},
+    {"code": "nublense",    "name": "Ñublense",        "slug": "nublense",       "id": "vVvwgdNn"},
+    {"code": "depconce",    "name": "Dep. Concepción", "slug": "dep-concepcion", "id": "GKJrZE7I"},
+    {"code": "audax",       "name": "Audax Italiano",  "slug": "a-italiano",     "id": "rN3Jxc8g"},
+    {"code": "everton",     "name": "Everton",         "slug": "everton",        "id": "Kr3LOxgm"},
+    {"code": "ucatolica",   "name": "U. Católica",     "slug": "u-catolica",     "id": "Qe432hiO"},
+    {"code": "laserena",    "name": "La Serena",       "slug": "la-serena",      "id": "d6kYgx8t"},
+    {"code": "ohiggins",    "name": "O'Higgins",       "slug": "o-higgins",      "id": "hYrshGxg"},
+    {"code": "ulacalera",   "name": "U. La Calera",    "slug": "u-la-calera",    "id": "M34g8ulJ"},
+    {"code": "huachipato",  "name": "Huachipato",      "slug": "huachipato",     "id": "SlhZpIaP"},
+    {"code": "palestino",   "name": "Palestino",       "slug": "palestino",      "id": "U35cjf75"},
+    {"code": "cobresal",    "name": "Cobresal",        "slug": "cobresal",       "id": "YeUwzehC"}
+  ]
+}
