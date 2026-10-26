@@ -15,6 +15,7 @@ URLS = {
 }
 
 MATCH_ROW_SELECTOR = "div.event__match"
+COMPETITION = "Primera División"
 
 _browser: Browser | None = None
 _playwright = None
@@ -103,7 +104,24 @@ def _normalize_name(text: str) -> str:
     return "".join(c for c in text.lower() if c.isalnum())
 
 
-async def _extract_match_from_row(row) -> dict[str, Any]:
+def _infer_estado(home_score, away_score) -> str:
+    """Infiere el estado del partido según la disponibilidad de marcadores."""
+    if home_score is not None and away_score is not None:
+        return "finalizado"
+    return "programado"
+
+
+def _infer_temporada(date_str: str | None) -> str | None:
+    """Extrae el año como temporada desde una cadena de fecha."""
+    if not date_str:
+        return None
+    parsed = _parse_stage_time(date_str)
+    if parsed:
+        return str(parsed.year)
+    return None
+
+
+async def _extract_match_from_row(row, team_slug: str = "") -> dict[str, Any]:
     row_id = await row.get_attribute("id")
     match_id = row_id.split("_")[-1] if row_id else None
 
@@ -117,19 +135,30 @@ async def _extract_match_from_row(row) -> dict[str, Any]:
 
     home_score_el = await row.query_selector('[data-testid="wcl-tableScore"][data-side="home"]')
     away_score_el = await row.query_selector('[data-testid="wcl-tableScore"][data-side="away"]')
-    home_score = (await home_score_el.inner_text()).strip() if home_score_el else None
-    away_score = (await away_score_el.inner_text()).strip() if away_score_el else None
+    home_score_raw = (await home_score_el.inner_text()).strip() if home_score_el else None
+    away_score_raw = (await away_score_el.inner_text()).strip() if away_score_el else None
+
+    goles_local = _to_int(home_score_raw) if home_score_raw else None
+    goles_visitante = _to_int(away_score_raw) if away_score_raw else None
 
     href_el = await row.query_selector("a.eventRowLink")
     href = await href_el.get_attribute("href") if href_el else None
 
+    parsed_date = _parse_stage_time(stage_time)
+    fecha_iso = parsed_date.isoformat() if parsed_date else None
+    temporada = str(parsed_date.year) if parsed_date else None
+
     return {
+        "_id": match_id,                          # usado como _id en MongoDB (deduplicación)
         "match_id": match_id,
-        "date_or_time": stage_time,
-        "home_team": home_team,
-        "away_team": away_team,
-        "home_score": _to_int(home_score) if home_score else None,
-        "away_score": _to_int(away_score) if away_score else None,
+        "fecha": fecha_iso,
+        "temporada": temporada,
+        "competicion": COMPETITION,
+        "equipo_local": home_team,
+        "equipo_visitante": away_team,
+        "goles_local": goles_local,
+        "goles_visitante": goles_visitante,
+        "estado": _infer_estado(goles_local, goles_visitante),
         "url": href,
     }
 
@@ -144,7 +173,7 @@ async def scrape_team_recent_matches(team_slug: str, team_id: str) -> list[dict[
     async with scrape_page() as page:
         await _goto_and_wait(page, url, MATCH_ROW_SELECTOR)
         rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
-        return [await _extract_match_from_row(r) for r in rows]
+        return [await _extract_match_from_row(r, team_slug) for r in rows]
 
 
 async def scrape_team_upcoming_matches(team_slug: str, team_id: str) -> list[dict[str, Any]]:
@@ -152,7 +181,7 @@ async def scrape_team_upcoming_matches(team_slug: str, team_id: str) -> list[dic
     async with scrape_page() as page:
         await _goto_and_wait(page, url, MATCH_ROW_SELECTOR)
         rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
-        return [await _extract_match_from_row(r) for r in rows]
+        return [await _extract_match_from_row(r, team_slug) for r in rows]
 
 
 async def scrape_head_to_head(
@@ -162,8 +191,8 @@ async def scrape_head_to_head(
     target = _normalize_name(team_b_slug.replace("-", " "))
     return [
         m for m in all_matches
-        if target in _normalize_name(m.get("home_team") or "")
-        or target in _normalize_name(m.get("away_team") or "")
+        if target in _normalize_name(m.get("equipo_local") or "")
+        or target in _normalize_name(m.get("equipo_visitante") or "")
     ]
 
 
@@ -174,7 +203,7 @@ async def _scrape_matches_from_url(url: str, d_from, d_to) -> list[dict[str, Any
         matches = []
         for row in rows:
             m = await _extract_match_from_row(row)
-            parsed_date = _parse_stage_time(m.get("date_or_time"))
+            parsed_date = _parse_stage_time(m.get("fecha"))
             if parsed_date and d_from <= parsed_date <= d_to:
                 matches.append(m)
         return matches
@@ -214,5 +243,3 @@ def _to_int(value: str) -> int:
         return int(value.strip())
     except ValueError:
         return 0
-
-

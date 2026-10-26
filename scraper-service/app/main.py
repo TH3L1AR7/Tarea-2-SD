@@ -9,6 +9,7 @@ from . import scraper
 
 TEAMS_PATH = Path(__file__).resolve().parents[2] / "shared" / "teams.json"
 _teams_by_code: dict[str, dict[str, str]] = {}
+_teams_list: list[dict] = []
 
 
 class ScrapeRequest(BaseModel):
@@ -18,10 +19,11 @@ class ScrapeRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _teams_by_code
+    global _teams_by_code, _teams_list
     with open(TEAMS_PATH, encoding="utf-8") as f:
         raw = json.load(f)
-    _teams_by_code = {t["code"]: t for t in raw["teams"]}
+    _teams_list = raw["teams"]
+    _teams_by_code = {t["code"]: t for t in _teams_list}
     await scraper.init_browser()
     yield
     await scraper.close_browser()
@@ -40,6 +42,12 @@ def _resolve_team(code: str) -> dict[str, str]:
 @app.get("/health")
 async def health():
     return {"status": "ok", "teams_loaded": len(_teams_by_code)}
+
+
+@app.get("/teams")
+async def get_teams():
+    """Lista todos los equipos disponibles para scraping."""
+    return {"teams": _teams_list}
 
 
 @app.post("/scrape")
@@ -73,4 +81,4 @@ async def scrape(req: ScrapeRequest):
     except KeyError as e:
         raise HTTPException(status_code=422, detail=f"Falta parámetro requerido: {e}")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Error de scraping: {e}")  
+        raise HTTPException(status_code=502, detail=f"Error de scraping: {e}")
