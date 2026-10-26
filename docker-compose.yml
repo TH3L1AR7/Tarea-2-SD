@@ -1,60 +1,50 @@
 services:
-  redis:
-    image: redis:7-alpine
-    command: redis-server --maxmemory ${CACHE_SIZE:-5mb} --maxmemory-policy ${EVICTION_POLICY:-allkeys-lru}
+  mongodb:
+    image: mongo:7
     ports:
-      - "6379:6379"
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=soccerway
 
   scraper-service:
     build: ./scraper-service
     volumes:
       - ./shared:/shared:ro
-      - ./debug:/app/debug
     ports:
       - "8000:8000"
-    depends_on:
-      - metrics-service
-
-  metrics-service:
-    build: ./metrics-service
-    volumes:
-      - ./experiments/results:/data
-    ports:
-      - "8002:8000"
-
-  cache-service:
-    build: ./cache-service
-    volumes:
-      - ./shared:/shared:ro
-    ports:
-      - "8001:8000"
-    depends_on:
-      - redis
-      - scraper-service
-      - metrics-service
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - SCRAPER_URL=http://scraper-service:8000
-      - METRICS_URL=http://metrics-service:8000
-      - CACHE_TTL_Q1=${CACHE_TTL_Q1:-3600}
-      - CACHE_TTL_Q2=${CACHE_TTL_Q2:-300}
-      - CACHE_TTL_Q3=${CACHE_TTL_Q3:-1800}
-      - CACHE_TTL_Q4=${CACHE_TTL_Q4:-600}
-      - CACHE_TTL_Q5=${CACHE_TTL_Q5:-900}
-
-  traffic-generator:
-    build: ./traffic-generator
-    volumes:
-      - ./shared:/shared:ro
-      - ./experiments/results:/app/results
-    depends_on:
-      - cache-service
-    environment:
-      - CACHE_URL=http://cache-service:8000
       - TEAMS_FILE=/shared/teams.json
-      - RESULTS_DIR=/app/results
-      - GEN_DIST=${DISTRIBUTION:-uniform}
-      - GEN_RATE=${ARRIVAL_RATE:-10}
-      - GEN_REQUESTS=${TOTAL_REQUESTS:-500}
-      - GEN_ZIPF_S=${ZIPF_PARAM:-1.5}
+
+  collector-service:
+    build: ./collector-service
+    volumes:
+      - ./shared:/shared:ro
+    depends_on:
+      - mongodb
+      - scraper-service
+    environment:
+      - SCRAPER_URL=http://scraper-service:8000
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB=soccerway
+      - MONGO_COLLECTION=partidos
+      - TEAMS_FILE=/shared/teams.json
+
+  spark:
+    build: ./spark-service
+    depends_on:
+      - mongodb
+    volumes:
+      - ./spark-service:/app
+      - ./shared:/shared:ro
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB=soccerway
+      - MONGO_COLLECTION_INPUT=partidos
+      - MONGO_COLLECTION_OUTPUT=resultados
+      - SPARK_PARTITIONS=${SPARK_PARTITIONS:-1}
+      - SAMPLE_FRACTION=${SAMPLE_FRACTION:-1.0}
+
+volumes:
+  mongo_data:
