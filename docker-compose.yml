@@ -21,6 +21,8 @@ services:
     build: ./collector-service
     volumes:
       - ./shared:/shared:ro
+    ports:
+      - "8001:8000"
     depends_on:
       - mongodb
       - scraper-service
@@ -29,19 +31,17 @@ services:
       - MONGO_URI=mongodb://mongodb:27017
       - MONGO_DB=soccerway
       - MONGO_COLLECTION=partidos
-      - TEAMS_FILE=/shared/teams.json
 
-  spark:
+  spark-service:
     build: ./spark-service
+    ports:
+      - "8002:8000"
     depends_on:
       - mongodb
-    volumes:
-      - ./spark-service:/app
-      - ./shared:/shared:ro
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - MONGO_DB=soccerway
-      - MONGO_COLLECTION_INPUT=partidos
+      - MONGO_COLLECTION=partidos
       - MONGO_COLLECTION_OUTPUT=resultados
       - SPARK_PARTITIONS=${SPARK_PARTITIONS:-1}
       - SAMPLE_FRACTION=${SAMPLE_FRACTION:-1.0}
