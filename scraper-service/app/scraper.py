@@ -105,14 +105,12 @@ def _normalize_name(text: str) -> str:
 
 
 def _infer_estado(home_score, away_score) -> str:
-    """Infiere el estado del partido según la disponibilidad de marcadores."""
     if home_score is not None and away_score is not None:
         return "finalizado"
     return "programado"
 
 
 def _infer_temporada(date_str: str | None) -> str | None:
-    """Extrae el año como temporada desde una cadena de fecha."""
     if not date_str:
         return None
     parsed = _parse_stage_time(date_str)
@@ -149,7 +147,7 @@ async def _extract_match_from_row(row, team_slug: str = "") -> dict[str, Any]:
     temporada = str(parsed_date.year) if parsed_date else None
 
     return {
-        "_id": match_id,                          # usado como _id en MongoDB (deduplicación)
+        "_id": match_id,
         "match_id": match_id,
         "fecha": fecha_iso,
         "temporada": temporada,
@@ -223,6 +221,74 @@ async def scrape_matches_by_date_range(date_from: str, date_to: str) -> list[dic
             seen.add(m["match_id"])
             merged.append(m)
     return merged
+
+
+# ─── Lógica compartida para scraping con botón "show more" ────────────────────
+
+MORE_SELECTORS = [
+    '[data-testid="wcl-buttonLink"]',   # soccerway "show more" button
+    "a.event__more",
+    "div.event__more",
+    "[class*='showMore']",
+    "[class*='show-more']",
+    "[class*='loadMore']",
+    "a[href*='more']",
+]
+
+
+async def _scrape_extended_from_url(url: str, max_clicks: int = 10) -> list[dict[str, Any]]:
+    """Raspa una URL paginada con botón 'show more', retornando todos los partidos únicos."""
+    all_matches: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    async with scrape_page() as page:
+        await _goto_and_wait(page, url, MATCH_ROW_SELECTOR)
+
+        for _ in range(max_clicks + 1):
+            rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
+            for row in rows:
+                m = await _extract_match_from_row(row)
+                mid = m.get("match_id")
+                if mid and mid not in seen_ids:
+                    seen_ids.add(mid)
+                    all_matches.append(m)
+
+            more_btn = None
+            for sel in MORE_SELECTORS:
+                more_btn = await page.query_selector(sel)
+                if more_btn:
+                    break
+
+            if more_btn is None:
+                break
+
+            try:
+                await more_btn.scroll_into_view_if_needed()
+                await more_btn.click()
+                await asyncio.sleep(1.5)
+                await page.wait_for_selector(MATCH_ROW_SELECTOR, timeout=6_000)
+            except Exception:
+                break
+
+    return all_matches
+
+
+async def scrape_team_results_extended(
+    team_slug: str, team_id: str, max_clicks: int = 10
+) -> list[dict[str, Any]]:
+    """Raspa resultados extendidos de un equipo (Q6)."""
+    url = _team_url(team_slug, team_id, tab="resultados")
+    return await _scrape_extended_from_url(url, max_clicks=max_clicks)
+
+
+async def scrape_season_results(
+    season_url: str, max_clicks: int = 40
+) -> list[dict[str, Any]]:
+    """Raspa todos los resultados de una temporada completa (Q7).
+    Ejemplo de season_url:
+      https://cl.soccerway.com/chile/liga-de-primera-2024/resultados/
+    """
+    return await _scrape_extended_from_url(season_url, max_clicks=max_clicks)
 
 
 def _parse_stage_time(text: str | None, year: int | None = None) -> Any:
