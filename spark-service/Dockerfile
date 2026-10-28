@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# Los workers de PySpark deben poder importar app.pipeline
+ENV PYTHONPATH=/app \
+    PYSPARK_PYTHON=python3
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
