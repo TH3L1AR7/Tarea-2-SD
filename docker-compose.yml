@@ -19,8 +19,6 @@ services:
 
   collector-service:
     build: ./collector-service
-    volumes:
-      - ./shared:/shared:ro
     ports:
       - "8001:8000"
     depends_on:
@@ -31,9 +29,15 @@ services:
       - MONGO_URI=mongodb://mongodb:27017
       - MONGO_DB=soccerway
       - MONGO_COLLECTION=partidos
+      - SNAPSHOT_PATH=/data/raw_snapshot.json
+      - MAX_CLICKS=60
+    volumes:
+      - collector_data:/data
 
   spark-service:
     build: ./spark-service
+    volumes:
+      - ./shared:/shared:ro
     ports:
       - "8002:8000"
     depends_on:
@@ -45,6 +49,10 @@ services:
       - MONGO_COLLECTION_OUTPUT=resultados
       - SPARK_PARTITIONS=${SPARK_PARTITIONS:-1}
       - SAMPLE_FRACTION=${SAMPLE_FRACTION:-1.0}
+      - SAMPLE_SEED=42
+      - SPARK_MASTER=local[4]
+      - TEAMS_FILE=/shared/teams.json
 
 volumes:
   mongo_data:
+  collector_data:

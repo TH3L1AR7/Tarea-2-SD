@@ -9,3 +9,6 @@ report/*.aux
 report/*.log
 report/*.out
 report/
+experiments/results/collect.json
+*.png
+!experiments/results/**/*.png

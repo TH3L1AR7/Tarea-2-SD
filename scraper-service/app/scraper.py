@@ -1,4 +1,5 @@
 import asyncio
+import re
 import unicodedata
 from datetime import datetime
 from typing import Any
@@ -104,27 +105,33 @@ def _normalize_name(text: str) -> str:
     return "".join(c for c in text.lower() if c.isalnum())
 
 
-def _infer_estado(home_score, away_score) -> str:
+def _infer_estado(home_score, away_score, stage_txt: str = "") -> str:
+    """Estado del encuentro. Primero mira el texto de estado de la fila
+    (Aplazado / Suspendido / Abandonado...), luego la presencia de marcador."""
+    s = (stage_txt or "").lower()
+    if any(k in s for k in ("aplaz", "postp", "reprog")):
+        return "reprogramado"
+    if any(k in s for k in ("susp", "aband", "cancel", "interr")):
+        return "suspendido"
     if home_score is not None and away_score is not None:
         return "finalizado"
     return "programado"
 
 
-def _infer_temporada(date_str: str | None) -> str | None:
-    if not date_str:
-        return None
-    parsed = _parse_stage_time(date_str)
-    if parsed:
-        return str(parsed.year)
-    return None
-
-
-async def _extract_match_from_row(row, team_slug: str = "") -> dict[str, Any]:
+async def _extract_match_from_row(
+    row, season_year: int | None = None, competicion: str = COMPETITION
+) -> dict[str, Any]:
+    """Extrae un partido de una fila. `season_year` es el año de la temporada
+    (sacado de la URL); se usa para completar fechas que vienen sin año."""
     row_id = await row.get_attribute("id")
     match_id = row_id.split("_")[-1] if row_id else None
 
     stage_time_el = await row.query_selector('[data-testid="wcl-stageTime"]')
     stage_time = (await stage_time_el.inner_text()).strip() if stage_time_el else None
+
+    # Texto de estado (Aplazado, Suspendido, ...). VERIFICAR selector en el navegador.
+    stage_el = await row.query_selector(".event__stage")
+    stage_txt = (await stage_el.inner_text()).strip() if stage_el else ""
 
     home_el = await row.query_selector(".event__homeParticipant")
     away_el = await row.query_selector(".event__awayParticipant")
@@ -136,27 +143,32 @@ async def _extract_match_from_row(row, team_slug: str = "") -> dict[str, Any]:
     home_score_raw = (await home_score_el.inner_text()).strip() if home_score_el else None
     away_score_raw = (await away_score_el.inner_text()).strip() if away_score_el else None
 
-    goles_local = _to_int(home_score_raw) if home_score_raw else None
-    goles_visitante = _to_int(away_score_raw) if away_score_raw else None
+    goles_local = _to_int(home_score_raw)
+    goles_visitante = _to_int(away_score_raw)
 
     href_el = await row.query_selector("a.eventRowLink")
     href = await href_el.get_attribute("href") if href_el else None
 
-    parsed_date = _parse_stage_time(stage_time)
-    fecha_iso = parsed_date.isoformat() if parsed_date else None
-    temporada = str(parsed_date.year) if parsed_date else None
+    parsed_date = _parse_stage_time(stage_time, season_year)
+    if season_year is not None:
+        temporada = str(season_year)
+    else:
+        temporada = str(parsed_date.year) if parsed_date else None
 
     return {
         "_id": match_id,
         "match_id": match_id,
-        "fecha": fecha_iso,
+        "fecha": parsed_date.isoformat() if parsed_date else None,
+        "fecha_raw": stage_time,                       # texto original, para auditoría
         "temporada": temporada,
-        "competicion": COMPETITION,
+        "competicion": competicion,
         "equipo_local": home_team,
         "equipo_visitante": away_team,
         "goles_local": goles_local,
         "goles_visitante": goles_visitante,
-        "estado": _infer_estado(goles_local, goles_visitante),
+        "goles_raw": [home_score_raw, away_score_raw], # texto original, para auditoría
+        "estado": _infer_estado(goles_local, goles_visitante, stage_txt),
+        "estado_raw": stage_txt,
         "url": href,
     }
 
@@ -171,7 +183,7 @@ async def scrape_team_recent_matches(team_slug: str, team_id: str) -> list[dict[
     async with scrape_page() as page:
         await _goto_and_wait(page, url, MATCH_ROW_SELECTOR)
         rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
-        return [await _extract_match_from_row(r, team_slug) for r in rows]
+        return [await _extract_match_from_row(r) for r in rows]
 
 
 async def scrape_team_upcoming_matches(team_slug: str, team_id: str) -> list[dict[str, Any]]:
@@ -179,7 +191,7 @@ async def scrape_team_upcoming_matches(team_slug: str, team_id: str) -> list[dic
     async with scrape_page() as page:
         await _goto_and_wait(page, url, MATCH_ROW_SELECTOR)
         rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
-        return [await _extract_match_from_row(r, team_slug) for r in rows]
+        return [await _extract_match_from_row(r) for r in rows]
 
 
 async def scrape_head_to_head(
@@ -200,8 +212,8 @@ async def _scrape_matches_from_url(url: str, d_from, d_to) -> list[dict[str, Any
         rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
         matches = []
         for row in rows:
-            m = await _extract_match_from_row(row)
-            parsed_date = _parse_stage_time(m.get("fecha"))
+            m = await _extract_match_from_row(row, season_year=d_from.year)
+            parsed_date = datetime.fromisoformat(m["fecha"]).date() if m.get("fecha") else None
             if parsed_date and d_from <= parsed_date <= d_to:
                 matches.append(m)
         return matches
@@ -225,51 +237,87 @@ async def scrape_matches_by_date_range(date_from: str, date_to: str) -> list[dic
 
 # ─── Lógica compartida para scraping con botón "show more" ────────────────────
 
-MORE_SELECTORS = [
-    '[data-testid="wcl-buttonLink"]',   # soccerway "show more" button
-    "a.event__more",
-    "div.event__more",
-    "[class*='showMore']",
-    "[class*='show-more']",
-    "[class*='loadMore']",
-    "a[href*='more']",
-]
+MORE_TEXTS = ["Mostrar más partidos", "Mostrar más", "Show more matches", "Show more"]
+MORE_SELECTORS = ["a.event__more", "div.event__more", "[class*='event__more']"]
+COOKIE_SELECTORS = ["#onetrust-accept-btn-handler", "button:has-text('Acepto')",
+                    "button:has-text('Aceptar')", "button:has-text('I Accept')"]
 
 
-async def _scrape_extended_from_url(url: str, max_clicks: int = 10) -> list[dict[str, Any]]:
-    """Raspa una URL paginada con botón 'show more', retornando todos los partidos únicos."""
-    all_matches: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+async def _accept_cookies(page: Page) -> None:
+    """El banner de cookies tapa el botón 'Mostrar más'."""
+    for sel in COOKIE_SELECTORS:
+        try:
+            btn = page.locator(sel).first
+            if await btn.is_visible(timeout=1_000):
+                await btn.click()
+                await asyncio.sleep(0.5)
+                return
+        except Exception:
+            continue
 
+
+async def _find_more_button(page: Page):
+    """Busca el botón 'Mostrar más' por texto y luego por selector. Solo visibles."""
+    for txt in MORE_TEXTS:
+        loc = page.get_by_text(txt, exact=False)
+        for i in range(await loc.count()):
+            el = loc.nth(i)
+            if await el.is_visible():
+                return el
+    for sel in MORE_SELECTORS:
+        loc = page.locator(sel)
+        for i in range(await loc.count()):
+            el = loc.nth(i)
+            if await el.is_visible():
+                return el
+    return None
+
+
+async def _scrape_extended_from_url(
+    url: str, max_clicks: int = 10, season_year: int | None = None
+) -> list[dict[str, Any]]:
+    """Raspa una URL con botón 'Mostrar más'. Se detiene cuando no hay botón o
+    cuando un clic no agrega filas nuevas (evita clics inútiles al sitio)."""
     async with scrape_page() as page:
         await _goto_and_wait(page, url, MATCH_ROW_SELECTOR)
+        await _accept_cookies(page)
 
-        for _ in range(max_clicks + 1):
-            rows = await page.query_selector_all(MATCH_ROW_SELECTOR)
-            for row in rows:
-                m = await _extract_match_from_row(row)
-                mid = m.get("match_id")
-                if mid and mid not in seen_ids:
-                    seen_ids.add(mid)
-                    all_matches.append(m)
-
-            more_btn = None
-            for sel in MORE_SELECTORS:
-                more_btn = await page.query_selector(sel)
-                if more_btn:
-                    break
-
-            if more_btn is None:
+        clicks = 0
+        n_rows = await page.locator(MATCH_ROW_SELECTOR).count()
+        while clicks < max_clicks:
+            btn = await _find_more_button(page)
+            if btn is None:
                 break
-
             try:
-                await more_btn.scroll_into_view_if_needed()
-                await more_btn.click()
-                await asyncio.sleep(1.5)
-                await page.wait_for_selector(MATCH_ROW_SELECTOR, timeout=6_000)
+                await btn.scroll_into_view_if_needed()
+                await btn.click(timeout=5_000)
             except Exception:
+                try:
+                    await btn.evaluate("el => el.click()")
+                except Exception:
+                    break
+            clicks += 1
+
+            nuevas = False
+            for _ in range(16):  # hasta ~8 s esperando filas nuevas
+                await asyncio.sleep(0.5)
+                n_new = await page.locator(MATCH_ROW_SELECTOR).count()
+                if n_new > n_rows:
+                    n_rows, nuevas = n_new, True
+                    break
+            if not nuevas:
                 break
 
+        print(f"[scraper] {url} clicks={clicks} filas={n_rows}", flush=True)
+
+        all_matches: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for row in await page.query_selector_all(MATCH_ROW_SELECTOR):
+            m = await _extract_match_from_row(row, season_year)
+            mid = m.get("match_id")
+            if mid and mid not in seen_ids:
+                seen_ids.add(mid)
+                all_matches.append(m)
     return all_matches
 
 
@@ -285,27 +333,42 @@ async def scrape_season_results(
     season_url: str, max_clicks: int = 40
 ) -> list[dict[str, Any]]:
     """Raspa todos los resultados de una temporada completa (Q7).
-    Ejemplo de season_url:
-      https://cl.soccerway.com/chile/liga-de-primera-2024/resultados/
+    Ejemplos de season_url:
+      https://cl.soccerway.com/chile/liga-de-primera-2024/resultados/  -> temporada 2024
+      https://cl.soccerway.com/chile/liga-de-primera/resultados/       -> temporada actual
     """
-    return await _scrape_extended_from_url(season_url, max_clicks=max_clicks)
+    m = re.search(r"liga-de-primera-(\d{4})", season_url)
+    season_year = int(m.group(1)) if m else datetime.now().year
+    return await _scrape_extended_from_url(season_url, max_clicks=max_clicks, season_year=season_year)
+
+
+_DATE_RE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4})?")
 
 
 def _parse_stage_time(text: str | None, year: int | None = None) -> Any:
+    """Parsea 'dd.mm. hh:mm' o 'dd.mm.aaaa'. Si el texto no trae año usa `year`
+    (año de la temporada). Si no hay año disponible devuelve None: nunca se
+    inventa el año con datetime.now()."""
     if not text:
         return None
-    text = text.strip()
-    date_part = text.split(" ")[0].rstrip(".")
+    m = _DATE_RE.match(text.strip())
+    if not m:
+        return None
+    d, mth, y = m.groups()
+    y = int(y) if y else year
+    if y is None:
+        return None
     try:
-        day_str, month_str = date_part.split(".")
-        y = year or datetime.now().year
-        return datetime(y, int(month_str), int(day_str)).date()
-    except (ValueError, AttributeError):
+        return datetime(y, int(mth), int(d)).date()
+    except ValueError:
         return None
 
 
-def _to_int(value: str) -> int:
+def _to_int(value) -> int | None:
+    """Convierte a int. Valores no numéricos -> None (inválido), no 0."""
+    if value is None:
+        return None
     try:
-        return int(value.strip())
+        return int(str(value).strip())
     except ValueError:
-        return 0
+        return None
