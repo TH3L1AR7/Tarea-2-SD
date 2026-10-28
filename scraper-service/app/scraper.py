@@ -289,6 +289,8 @@ async def _scrape_extended_from_url(
             if btn is None:
                 break
             try:
+                html = (await btn.evaluate("el => el.outerHTML"))[:200]
+                print(f"[scraper] click {clicks + 1} en: {html}", flush=True)
                 await btn.scroll_into_view_if_needed()
                 await btn.click(timeout=5_000)
             except Exception:
@@ -309,6 +311,10 @@ async def _scrape_extended_from_url(
                 break
 
         print(f"[scraper] {url} clicks={clicks} filas={n_rows}", flush=True)
+        try:
+            await page.screenshot(path=f"/tmp/{url.rstrip('/').split('/')[-2]}.png", full_page=True)
+        except Exception:
+            pass
 
         all_matches: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
