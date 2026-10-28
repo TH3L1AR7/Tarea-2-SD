@@ -1,0 +1,69 @@
+{
+  "writes": [
+    {
+      "recolectados": 1054,
+      "insertados": 1054,
+      "descartados": 0,
+      "descartados_por_motivo": {},
+      "duplicados_en_lote": 0,
+      "duplicados_en_db": 0,
+      "estados_en_lote": {
+        "finalizado": 1052,
+        "programado": 2
+      },
+      "total_en_db": 1054,
+      "t_write_total_seg": 0.0652,
+      "t_write_avg_por_doc_seg": 6.2e-05
+    },
+    {
+      "recolectados": 1054,
+      "insertados": 1054,
+      "descartados": 0,
+      "descartados_por_motivo": {},
+      "duplicados_en_lote": 0,
+      "duplicados_en_db": 0,
+      "estados_en_lote": {
+        "finalizado": 1052,
+        "programado": 2
+      },
+      "total_en_db": 1054,
+      "t_write_total_seg": 0.0413,
+      "t_write_avg_por_doc_seg": 3.9e-05
+    },
+    {
+      "recolectados": 1054,
+      "insertados": 1054,
+      "descartados": 0,
+      "descartados_por_motivo": {},
+      "duplicados_en_lote": 0,
+      "duplicados_en_db": 0,
+      "estados_en_lote": {
+        "finalizado": 1052,
+        "programado": 2
+      },
+      "total_en_db": 1054,
+      "t_write_total_seg": 0.0248,
+      "t_write_avg_por_doc_seg": 2.3e-05
+    }
+  ],
+  "reads": [
+    {
+      "documentos": 1054,
+      "t_mongo_read_seg": 0.0535,
+      "t_rdd_load_seg": 0.8926,
+      "t_total_seg": 0.9461
+    },
+    {
+      "documentos": 1054,
+      "t_mongo_read_seg": 0.0201,
+      "t_rdd_load_seg": 0.1753,
+      "t_total_seg": 0.1954
+    },
+    {
+      "documentos": 1054,
+      "t_mongo_read_seg": 0.025,
+      "t_rdd_load_seg": 0.1102,
+      "t_total_seg": 0.1353
+    }
+  ]
+}

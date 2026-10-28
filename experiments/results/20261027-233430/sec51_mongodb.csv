@@ -1,0 +1,5 @@
+rep,insertados,t_write_total_seg,t_write_avg_por_doc_seg,t_mongo_read_seg,t_rdd_load_seg,t_read_total_seg
+1,1054,0.0652,6.2e-05,0.0535,0.8926,0.9461
+2,1054,0.0413,3.9e-05,0.0201,0.1753,0.1954
+3,1054,0.0248,2.3e-05,0.025,0.1102,0.1353
+promedio,1054,0.0438,0.0,0.0329,0.3927,0.4256

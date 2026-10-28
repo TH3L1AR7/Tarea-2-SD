@@ -1,0 +1,19 @@
+{
+  "etapas": {
+    "0_crudos": 1054,
+    "1_con_campos_esenciales": 1054,
+    "2_finalizados": 1052,
+    "3_resultado_valido": 1052,
+    "4_normalizados_equipos_distintos": 1052,
+    "5_unicos_por_match_id": 1052,
+    "6_unicos_por_clave_natural": 1052
+  },
+  "descartes": {
+    "sin_campos_esenciales": 0,
+    "no_finalizados": 2,
+    "resultado_invalido": 0,
+    "mismo_equipo": 0,
+    "duplicado_match_id": 0,
+    "duplicado_clave_natural": 0
+  }
+}
