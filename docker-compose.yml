@@ -1,0 +1,50 @@
+services:
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=soccerway
+
+  scraper-service:
+    build: ./scraper-service
+    volumes:
+      - ./shared:/shared:ro
+    ports:
+      - "8000:8000"
+    environment:
+      - TEAMS_FILE=/shared/teams.json
+
+  collector-service:
+    build: ./collector-service
+    volumes:
+      - ./shared:/shared:ro
+    ports:
+      - "8001:8000"
+    depends_on:
+      - mongodb
+      - scraper-service
+    environment:
+      - SCRAPER_URL=http://scraper-service:8000
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB=soccerway
+      - MONGO_COLLECTION=partidos
+
+  spark-service:
+    build: ./spark-service
+    ports:
+      - "8002:8000"
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB=soccerway
+      - MONGO_COLLECTION=partidos
+      - MONGO_COLLECTION_OUTPUT=resultados
+      - SPARK_PARTITIONS=${SPARK_PARTITIONS:-1}
+      - SAMPLE_FRACTION=${SAMPLE_FRACTION:-1.0}
+
+volumes:
+  mongo_data:
