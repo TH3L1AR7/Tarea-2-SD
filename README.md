@@ -2,6 +2,19 @@
 
 Flujo: **Soccerway → scraper → collector → MongoDB → Spark (RDD) → MongoDB (`resultados`)**.
 
+## Integrantes
+
+| Nombre | Correo |
+|---|---|
+| Benjamín Casanova | benjamin.casanova@mail.udp.cl |
+| Lucas Echeverría | lucas.echeverria@mail.udp.cl |
+
+## Links
+
+- **Repositorio:** https://giteit.udp.cl/CIT2011/2026-2/seccion-2/grupo-10/-/tree/tarea2
+- **Video de demostración:** _(pendiente)_
+- **Resultados de los experimentos usados en el informe:** [`experiments/results/20261027-233430/`](experiments/results/20261027-233430/)
+
 ## Arquitectura
 
 | Servicio | Puerto | Responsabilidad |
@@ -21,7 +34,7 @@ Código Spark: `spark-service/app/pipeline.py` (lógica) y `spark-service/app/ma
 ## Ejecución
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # Windows cmd: copy .env.example .env
 docker compose up -d --build
 
 # 1–2. Recolección + ingesta (raspa Soccerway; tarda varios minutos)
@@ -34,8 +47,35 @@ curl -X POST "localhost:8002/analyze?sample_fraction=1.0&partitions=1"
 
 Ver resultados guardados:
 ```bash
-docker compose exec mongodb mongosh soccerway --eval 'db.resultados.find({}, {resultados:0}).pretty()'
+docker compose exec mongodb mongosh soccerway --eval "db.resultados.find({}, {resultados:0})"
 ```
+
+## Detener y reiniciar desde cero
+
+| Comando | Qué hace | Datos de MongoDB | Snapshot del collector |
+|---|---|---|---|
+| `docker compose stop` | Detiene los contenedores | Se conservan | Se conserva |
+| `docker compose down` | Detiene y elimina los contenedores | Se conservan | Se conserva |
+| `docker compose down -v` | Además **elimina los volúmenes** | **Se borran** | **Se borra** |
+
+Los datos viven en los volúmenes `mongo_data` y `collector_data`, por lo que sobreviven a `stop`, `down` y
+reinicios del equipo. Solo `down -v` los elimina.
+
+Para partir completamente de cero (base vacía y nuevo scraping):
+```bash
+docker compose down -v
+docker compose up -d --build
+curl -X POST localhost:8001/collect
+```
+
+Para vaciar solo la colección de partidos sin borrar el snapshot (y sin volver a raspar):
+```bash
+curl -X DELETE localhost:8001/delete     # deja `partidos` vacía
+curl -X POST localhost:8001/reingest     # vuelve a cargarla desde el snapshot
+```
+
+> Después de `down -v` hay que ejecutar `/collect` de nuevo antes de `/reingest`, `/analyze` o los
+> experimentos con `--skip-collect`, porque el snapshot también se borró.
 
 ## Endpoints
 
@@ -58,26 +98,113 @@ compara contra valores calculados a mano y verifica que los resultados sean idé
 
 ## Experimentos
 
+Hay dos formas de reproducirlos: con el script (recomendada) o a mano con `curl`. Ambas llaman a los
+mismos endpoints con los mismos parámetros; el script solo automatiza las repeticiones, los promedios
+y los gráficos.
+
+### Opción A: con script
+
+Requiere `pip install requests matplotlib` en el host.
+
 ```bash
 python experiments/run_experiments.py                 # raspa 1 vez y corre todo
 python experiments/run_experiments.py --skip-collect  # reutiliza el snapshot
 ```
-Genera `experiments/results/<timestamp>/`:
+Tarda ~2 minutos con `--skip-collect`. Genera `experiments/results/<timestamp>/`:
 
 | Archivo | Contenido |
 |---|---|
-| `collect.json` | Recolectados, insertados, descartados (por motivo), duplicados. |
 | `sec51_mongodb.csv` | 3 repeticiones de escritura (`/reingest`) y lectura (`/read-benchmark`) + promedio. |
 | `limpieza.json` | Registros por etapa de limpieza y descartes por regla. |
 | `exp1_volumen.csv/.png` | N, N/2, N/4 con 1 partición (media ± desv. de 3 reps por consulta). |
 | `exp2_particiones.csv/.png` | 1, 2, 4 particiones con N completo. |
 | `verificacion_particiones.json` | Resultados idénticos entre particiones (sí/no). |
 
-Se ejecuta 1 corrida de calentamiento descartada antes de medir (arranque de JVM y workers Python).
+Además, en la carpeta de resultados usada en el informe (`experiments/results/20261027-233430/`) se
+guardaron a mano dos archivos de evidencia:
+
+| Archivo | Cómo se obtuvo |
+|---|---|
+| `collect.json` | Respuesta de `POST /collect`: recolectados por temporada, insertados, descartados y duplicados. |
+| `validate.txt` | Salida de `docker compose exec -T spark-service python -m app.validate`. |
+
+Orden de ejecución: (1) 3 × escritura y lectura en MongoDB, (2) 1 corrida de calentamiento descartada
+(arranque de JVM y workers Python), (3) Experimento 1, (4) Experimento 2, cada configuración 3 veces,
+(5) comparación de resultados entre particiones.
+
+### Opción B: a mano (sin script)
+
+Los comandos funcionan igual en `cmd`, PowerShell (usar `curl.exe`) y bash. "×3" significa ejecutar
+**ese mismo comando 3 veces seguidas** y promediar los 3 tiempos; se repite porque una sola medición
+varía por la carga del equipo.
+
+| Paso | Comandos distintos | Repeticiones | Ejecuciones |
+|---|---|---|---|
+| 0. Recolección | 1 (`/collect`) | 1 | 1 |
+| 1. Sección 5.1 | 2 (`/reingest`, `/read-benchmark`) | 3 | 6 |
+| 2. Calentamiento | 1 | 1 (se descarta) | 1 |
+| 3. Experimento 1 | 3 (N, N/2, N/4) | 3 | 9 |
+| 4. Experimento 2 | 3 (1, 2, 4 particiones) | 3 | 9 |
+| **Total** | | | **26** (25 sin contar la recolección) |
+
+**0. Recolección (una sola vez)**
+```bash
+curl -X POST localhost:8001/collect      # recolectados, insertados, descartados, duplicados
+curl localhost:8001/count                # conteos por estado y temporada
+```
+
+**1. Sección 5.1: escritura y lectura en MongoDB (×3 → 6 ejecuciones)**
+```bash
+curl -X POST localhost:8001/reingest     # t_write_total_seg, t_write_avg_por_doc_seg
+curl -X POST localhost:8002/read-benchmark   # t_mongo_read_seg, t_rdd_load_seg, t_total_seg
+```
+
+**2. Calentamiento (ejecutar una vez y descartar)**
+```bash
+curl -X POST "localhost:8002/analyze?persist=false"
+```
+
+**3. Experimento 1: volumen, 1 partición (×3 cada uno → 9 ejecuciones)**
+```bash
+curl -X POST "localhost:8002/analyze?sample_fraction=1.0&partitions=1"
+curl -X POST "localhost:8002/analyze?sample_fraction=0.5&partitions=1"
+curl -X POST "localhost:8002/analyze?sample_fraction=0.25&partitions=1"
+```
+
+**4. Experimento 2: particiones, N completo (×3 cada uno → 9 ejecuciones)**
+```bash
+curl -X POST "localhost:8002/analyze?sample_fraction=1.0&partitions=1"
+curl -X POST "localhost:8002/analyze?sample_fraction=1.0&partitions=2"
+curl -X POST "localhost:8002/analyze?sample_fraction=1.0&partitions=4"
+```
+
+**Qué anotar de cada respuesta de `/analyze`:**
+
+| Campo | Significado |
+|---|---|
+| `partidos_analizados` | Tamaño real del dataset usado (N, ≈N/2 o ≈N/4). |
+| `limpieza.etapas` / `limpieza.descartes` | Registros por etapa de limpieza. |
+| `timings_queries_seg.q1` … `q8` | Tiempo de cada consulta (datos ya en memoria). |
+| `tiempos_seg` | Tiempos por fase: `t_mongo_read`, `t_rdd_load`, `t_limpieza`, `t_cache`, `t_queries_total`, `t_total`. |
+| `resultados` | Salida de las 8 consultas; debe ser idéntica con 1, 2 y 4 particiones. |
+
+Para ver solo los tiempos en lugar de la respuesta completa:
+```bash
+curl -s -X POST "localhost:8002/analyze?partitions=4&persist=false" | python -c "import sys,json;d=json.load(sys.stdin);print(d['partidos_analizados'],d['tiempos_seg'],d['timings_queries_seg'])"
+```
+
+**Comparación entre ambas opciones**
+
+| | Con script | A mano |
+|---|---|---|
+| Ejecuciones | 25 (+1 recolección opcional), automáticas | 25 (+1 recolección), una por una |
+| Tiempo | ~2 min | ~1–1,5 h (incluye anotar y promediar) |
+| Promedios, desviación y gráficos | Automáticos | En planilla |
+| Verificación entre particiones | Automática | Comparar `resultados` a mano |
 
 ## Decisiones de diseño
 
-**Recolección.** Solo páginas de liga (`liga-de-primera[-AAAA]/resultados/`, temporadas 2019 a la actual): todo es
+**Recolección.** Solo páginas de liga (`liga-de-primera[-AAAA]/resultados/`, temporadas 2017 a la actual): todo es
 Primera División y la temporada se toma de la URL. Las páginas por equipo de la T1 mezclaban copas internacionales.
 
 **Esquema del documento (`partidos`).**
