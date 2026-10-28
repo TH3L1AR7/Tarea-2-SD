@@ -1,23 +1,28 @@
 """
 Experimentos Tarea 2 - Sistemas Distribuidos
 ============================================
-Ejecuta todos los experimentos y guarda los resultados en results/.
+Uso (con `docker compose up -d --build` corriendo):
 
-Estructura de salida (igual a Tarea 1):
-  results/events.jsonl                              ← log corriente de cada run
-  results/mongodb_timings_<timestamp>.json/.csv     ← Sección 5.1
-  results/exp1_vary_data_<timestamp>.json/.csv      ← Experimento 1
-  results/exp2_vary_partitions_<timestamp>.json/.csv← Experimento 2
+    pip install requests matplotlib        # matplotlib es opcional (gráficos)
+    python experiments/run_experiments.py               # raspa 1 vez + todo
+    python experiments/run_experiments.py --skip-collect  # usa el snapshot ya raspado
 
-Uso:
-    python experiments/run_experiments.py
+Qué hace:
+  0. (opcional) POST /collect: raspa Soccerway UNA sola vez y guarda snapshot.
+  1. Sección 5.1: REPS x (reingesta completa en MongoDB) y REPS x (lectura MongoDB -> RDD).
+  2. Warm-up: 1 ejecución descartada (arranque de JVM / workers Python).
+  3. Experimento 1: N, N/2, N/4 con 1 partición, REPS repeticiones cada uno.
+  4. Experimento 2: 1, 2, 4 particiones con N completo, REPS repeticiones cada uno.
+  5. Verifica que los resultados sean idénticos entre particiones.
 
-Requiere: pip install requests
+Salida en experiments/results/<timestamp>/ : JSON crudo, CSV resumen y PNG.
 """
 
+import argparse
 import csv
 import json
-import time
+import statistics as st
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -25,284 +30,149 @@ import requests
 
 COLLECTOR = "http://localhost:8001"
 SPARK     = "http://localhost:8002"
-RESULTS   = Path(__file__).parent / "results"
-RESULTS.mkdir(exist_ok=True)
+REPS      = 3
+QUERIES   = [f"q{i}" for i in range(1, 9)]
 
-EVENTS_LOG = RESULTS / "events.jsonl"
-N_REPS     = 3  # repeticiones por medición
-
-
-# ─── utilidades ──────────────────────────────────────────────────────────────
-
-def _ts() -> str:
-    """Timestamp legible para nombre de archivo."""
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+OUT = Path(__file__).parent / "results" / datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
-def _log_event(event_type: str, label: str, detail: dict | None = None):
-    """Agrega una línea al log events.jsonl (igual que Tarea 1)."""
-    entry = {
-        "event_type": event_type,
-        "label":      label,
-        "detail":     detail,
-        "timestamp":  time.time(),
-    }
-    with open(EVENTS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+def _post(url, **kw):
+    r = requests.post(url, timeout=kw.pop("timeout", 600), **kw)
+    r.raise_for_status()
+    return r.json()
 
 
-def save_json(label: str, data: dict) -> Path:
-    path = RESULTS / f"{label}_{_ts()}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    print(f"  → {path.name}")
-    return path
+def _save_json(name, data):
+    (OUT / f"{name}.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def save_csv(label: str, rows: list[dict]) -> Path:
+def _save_csv(name, rows):
     if not rows:
-        return None
-    path = RESULTS / f"{label}_{_ts()}.csv"
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"  → {path.name}")
-    return path
+        return
+    with open(OUT / f"{name}.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
 
 
-# ─── llamadas a los servicios ─────────────────────────────────────────────────
-
-def delete_partidos():
-    r = requests.delete(f"{COLLECTOR}/delete", timeout=30)
-    r.raise_for_status()
-    return r.json()
+def _mean_std(xs):
+    return round(st.mean(xs), 4), round(st.stdev(xs), 4) if len(xs) > 1 else 0.0
 
 
-def collect():
-    print("  [collect] raspando soccerway... (~10 min)")
-    r = requests.post(f"{COLLECTOR}/collect", timeout=1200)
-    r.raise_for_status()
-    return r.json()
+def analyze(fraction, parts):
+    return _post(f"{SPARK}/analyze", params={"sample_fraction": fraction, "partitions": parts})
 
 
-def analyze(sample_fraction: float = 1.0, partitions: int = 1) -> dict:
-    r = requests.post(
-        f"{SPARK}/analyze",
-        params={"sample_fraction": sample_fraction, "partitions": partitions},
-        timeout=300,
-    )
-    r.raise_for_status()
-    return r.json()
+# ─── Sección 5.1 ─────────────────────────────────────────────────────────────
+
+def mongodb_timings():
+    print("\n=== 5.1 MongoDB: escritura y lectura ===")
+    writes, reads = [], []
+    for i in range(1, REPS + 1):
+        w = _post(f"{COLLECTOR}/reingest")
+        r = _post(f"{SPARK}/read-benchmark")
+        writes.append(w)
+        reads.append(r)
+        print(f"  rep {i}: write={w['t_write_total_seg']}s ({w['insertados']} docs, "
+              f"{w['t_write_avg_por_doc_seg']} s/doc) | read={r['t_mongo_read_seg']}s + rdd={r['t_rdd_load_seg']}s")
+    rows = [{"rep": i + 1, "insertados": w["insertados"],
+             "t_write_total_seg": w["t_write_total_seg"], "t_write_avg_por_doc_seg": w["t_write_avg_por_doc_seg"],
+             "t_mongo_read_seg": r["t_mongo_read_seg"], "t_rdd_load_seg": r["t_rdd_load_seg"],
+             "t_read_total_seg": r["t_total_seg"]} for i, (w, r) in enumerate(zip(writes, reads))]
+    prom = {k: _mean_std([row[k] for row in rows])[0] for k in rows[0] if k not in ("rep", "insertados")}
+    rows.append({"rep": "promedio", "insertados": rows[0]["insertados"], **prom})
+    _save_json("sec51_mongodb", {"writes": writes, "reads": reads})
+    _save_csv("sec51_mongodb", rows)
+    return rows
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SECCIÓN 5.1 — Tiempos MongoDB (escritura y lectura, 3 repeticiones)
-# ══════════════════════════════════════════════════════════════════════════════
+# ─── Experimentos Spark ──────────────────────────────────────────────────────
 
-def run_mongodb_timings():
-    print("\n=== SECCIÓN 5.1: Tiempos MongoDB ===")
-    write_reps: list[dict] = []
-    read_reps:  list[dict] = []
-
-    for i in range(1, N_REPS + 1):
-        # ── Escritura: delete + collect ─────────────────────────────────────
-        print(f"\n  Repetición {i}/{N_REPS} — escritura")
-        delete_partidos()
-        result = collect()
-        wr = {
-            "rep":                     i,
-            "insertados":              result["insertados"],
-            "t_write_total_seg":       result["t_write_total_seg"],
-            "t_write_avg_por_doc_seg": result["t_write_avg_por_doc_seg"],
-        }
-        write_reps.append(wr)
-        _log_event("write", f"5.1_rep{i}", wr)
-        print(f"     write_total={result['t_write_total_seg']}s  avg/doc={result['t_write_avg_por_doc_seg']}s")
-
-        # ── Lectura: analyze ────────────────────────────────────────────────
-        print(f"  Repetición {i}/{N_REPS} — lectura")
-        spark = analyze(sample_fraction=1.0, partitions=1)
-        rr = {
-            "rep":              i,
-            "t_mongo_read_seg": spark["t_mongo_read_seg"],
-            "partidos":         spark["partidos_analizados"],
-        }
-        read_reps.append(rr)
-        _log_event("read", f"5.1_rep{i}", rr)
-        print(f"     read={spark['t_mongo_read_seg']}s")
-
-    avg_write     = sum(r["t_write_total_seg"]       for r in write_reps) / N_REPS
-    avg_write_doc = sum(r["t_write_avg_por_doc_seg"] for r in write_reps) / N_REPS
-    avg_read      = sum(r["t_mongo_read_seg"]        for r in read_reps)  / N_REPS
-
-    summary = {
-        "descripcion":        "Tiempos de escritura y lectura en MongoDB (3 repeticiones)",
-        "config":             {"repeticiones": N_REPS},
-        "write_repeticiones": write_reps,
-        "read_repeticiones":  read_reps,
-        "promedios": {
-            "t_write_total_seg_avg":       round(avg_write, 4),
-            "t_write_avg_por_doc_seg_avg": round(avg_write_doc, 6),
-            "t_mongo_read_seg_avg":        round(avg_read, 4),
-        },
-    }
-    save_json("mongodb_timings", summary)
-
-    # CSV: una fila por repetición con escritura + lectura juntas
-    csv_rows = []
-    for i in range(N_REPS):
-        csv_rows.append({
-            "rep":                     i + 1,
-            "insertados":              write_reps[i]["insertados"],
-            "t_write_total_seg":       write_reps[i]["t_write_total_seg"],
-            "t_write_avg_por_doc_seg": write_reps[i]["t_write_avg_por_doc_seg"],
-            "t_mongo_read_seg":        read_reps[i]["t_mongo_read_seg"],
-            "partidos":                read_reps[i]["partidos"],
-        })
-    save_csv("mongodb_timings", csv_rows)
-
-    print(f"\n  Promedios → write={avg_write:.4f}s  read={avg_read:.4f}s")
-    return summary
+def experimento(nombre, configs):
+    print(f"\n=== {nombre} ===")
+    crudo, filas, firmas = [], [], {}
+    for label, fraction, parts in configs:
+        runs = [analyze(fraction, parts) for _ in range(REPS)]
+        crudo.append({"label": label, "runs": runs})
+        fila = {"config": label, "fraction": fraction, "partitions": parts,
+                "partidos": runs[0]["partidos_analizados"]}
+        for q in QUERIES:
+            m, s = _mean_std([r["timings_queries_seg"][q] for r in runs])
+            fila[f"{q}_mean"], fila[f"{q}_std"] = m, s
+        for k in ("t_queries_total", "t_cache", "t_limpieza", "t_mongo_read", "t_rdd_load", "t_total"):
+            fila[f"{k}_mean"], fila[f"{k}_std"] = _mean_std([r["tiempos_seg"][k] for r in runs])
+        filas.append(fila)
+        firmas[label] = json.dumps(runs[0]["resultados"], sort_keys=True, ensure_ascii=False)
+        print(f"  {label:<14} partidos={fila['partidos']:<5} queries={fila['t_queries_total_mean']}s "
+              f"(±{fila['t_queries_total_std']})")
+    _save_json(nombre, crudo)
+    _save_csv(nombre, filas)
+    return filas, firmas, crudo
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EXPERIMENTO 1 — Varía tamaño de datos (N, N/2, N/4), particiones fijas en 1
-# ══════════════════════════════════════════════════════════════════════════════
-
-def run_experiment1():
-    print("\n=== EXPERIMENTO 1: Varía tamaño de datos (partitions=1) ===")
-    configs = [
-        {"sample_fraction": 1.00, "partitions": 1, "label": "N (100%)"},
-        {"sample_fraction": 0.50, "partitions": 1, "label": "N/2 (50%)"},
-        {"sample_fraction": 0.25, "partitions": 1, "label": "N/4 (25%)"},
-    ]
-    runs:     list[dict] = []
-    csv_rows: list[dict] = []
-
-    for cfg in configs:
-        print(f"\n  [{cfg['label']}] fraction={cfg['sample_fraction']} partitions={cfg['partitions']}")
-        spark = analyze(cfg["sample_fraction"], cfg["partitions"])
-
-        run = {
-            "label":               cfg["label"],
-            "sample_fraction":     cfg["sample_fraction"],
-            "partitions":          cfg["partitions"],
-            "partidos_analizados": spark["partidos_analizados"],
-            "t_mongo_read_seg":    spark["t_mongo_read_seg"],
-            "timings_segundos":    spark["timings_segundos"],
-        }
-        runs.append(run)
-        _log_event("exp1", cfg["label"], {k: v for k, v in run.items() if k != "timings_segundos"})
-        print(f"     partidos={spark['partidos_analizados']}  read={spark['t_mongo_read_seg']}s")
-        print(f"     timings={spark['timings_segundos']}")
-
-        # CSV: una fila por configuración, columnas planas por query
-        row = {
-            "label":               cfg["label"],
-            "sample_fraction":     cfg["sample_fraction"],
-            "partitions":          cfg["partitions"],
-            "partidos_analizados": spark["partidos_analizados"],
-            "t_mongo_read_seg":    spark["t_mongo_read_seg"],
-        }
-        for q, t in spark["timings_segundos"].items():
-            row[f"t_{q}_seg"] = t
-        csv_rows.append(row)
-
-    summary = {
-        "descripcion": "Experimento 1: varía tamaño de datos, particiones fijas en 1",
-        "config":      {"partitions_fijas": 1, "fracciones": [1.0, 0.5, 0.25]},
-        "runs":        runs,
-    }
-    save_json("exp1_vary_data", summary)
-    save_csv("exp1_vary_data", csv_rows)
-    return summary
+def graficar(filas, nombre, eje):
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  (matplotlib no instalado: se omiten gráficos)")
+        return
+    x = [f["config"] for f in filas]
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    w = 0.8 / len(filas)
+    for i, f in enumerate(filas):
+        ax.bar([j + i * w for j in range(len(QUERIES))], [f[f"{q}_mean"] for q in QUERIES], w,
+               yerr=[f[f"{q}_std"] for q in QUERIES], label=x[i], capsize=2)
+    ax.set_xticks([j + w * (len(filas) - 1) / 2 for j in range(len(QUERIES))], [q.upper() for q in QUERIES])
+    ax.set_ylabel("tiempo (s)")
+    ax.set_title(f"{nombre}: tiempo por consulta (media ± desv., {REPS} reps) — {eje}")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(OUT / f"{nombre}.png", dpi=150)
+    plt.close(fig)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EXPERIMENTO 2 — Varía particiones (1, 2, 4), datos fijos en N completo
-# ══════════════════════════════════════════════════════════════════════════════
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--skip-collect", action="store_true", help="no raspar; usar snapshot existente")
+    args = ap.parse_args()
+    OUT.mkdir(parents=True, exist_ok=True)
 
-def run_experiment2():
-    print("\n=== EXPERIMENTO 2: Varía particiones (sample_fraction=1.0) ===")
-    configs = [
-        {"sample_fraction": 1.0, "partitions": 1, "label": "1 partición"},
-        {"sample_fraction": 1.0, "partitions": 2, "label": "2 particiones"},
-        {"sample_fraction": 1.0, "partitions": 4, "label": "4 particiones"},
-    ]
-    runs:     list[dict] = []
-    csv_rows: list[dict] = []
+    for url in (COLLECTOR, SPARK):
+        requests.get(f"{url}/health", timeout=5).raise_for_status()
 
-    for cfg in configs:
-        print(f"\n  [{cfg['label']}] fraction={cfg['sample_fraction']} partitions={cfg['partitions']}")
-        spark = analyze(cfg["sample_fraction"], cfg["partitions"])
+    if not args.skip_collect:
+        print("[collect] raspando Soccerway (una sola vez)...")
+        c = _post(f"{COLLECTOR}/collect", timeout=3600)
+        _save_json("collect", c)
+        print(f"  recolectados={c['recolectados']} insertados={c['insertados']} "
+              f"descartados={c['descartados']} dup_lote={c['duplicados_en_lote']} dup_db={c['duplicados_en_db']}")
+        if c["errores"]:
+            print(f"  ERRORES: {c['errores']}")
 
-        run = {
-            "label":               cfg["label"],
-            "sample_fraction":     cfg["sample_fraction"],
-            "partitions":          cfg["partitions"],
-            "partidos_analizados": spark["partidos_analizados"],
-            "t_mongo_read_seg":    spark["t_mongo_read_seg"],
-            "timings_segundos":    spark["timings_segundos"],
-        }
-        runs.append(run)
-        _log_event("exp2", cfg["label"], {k: v for k, v in run.items() if k != "timings_segundos"})
-        print(f"     partidos={spark['partidos_analizados']}  read={spark['t_mongo_read_seg']}s")
-        print(f"     timings={spark['timings_segundos']}")
+    mongodb_timings()
 
-        row = {
-            "label":               cfg["label"],
-            "sample_fraction":     cfg["sample_fraction"],
-            "partitions":          cfg["partitions"],
-            "partidos_analizados": spark["partidos_analizados"],
-            "t_mongo_read_seg":    spark["t_mongo_read_seg"],
-        }
-        for q, t in spark["timings_segundos"].items():
-            row[f"t_{q}_seg"] = t
-        csv_rows.append(row)
+    print("\n[warm-up] ejecución descartada")
+    warm = analyze(1.0, 1)
+    _save_json("limpieza", warm["limpieza"])
+    print(f"  limpieza: {warm['limpieza']['etapas']}")
+    n = warm["partidos_analizados"]
+    print(f"  N válidos = {n} {'(OK >= 1000)' if n >= 1000 else '(¡MENOS DE 1000! revisar recolección)'}")
 
-    summary = {
-        "descripcion": "Experimento 2: varía particiones, datos fijos en N completo",
-        "config":      {"fraction_fija": 1.0, "particiones": [1, 2, 4]},
-        "runs":        runs,
-    }
-    save_json("exp2_vary_partitions", summary)
-    save_csv("exp2_vary_partitions", csv_rows)
-    return summary
+    f1, _, _ = experimento("exp1_volumen", [("N", 1.0, 1), ("N/2", 0.5, 1), ("N/4", 0.25, 1)])
+    graficar(f1, "exp1_volumen", "1 partición")
 
+    f2, firmas, _ = experimento("exp2_particiones",
+                                [("1 partición", 1.0, 1), ("2 particiones", 1.0, 2), ("4 particiones", 1.0, 4)])
+    graficar(f2, "exp2_particiones", f"N={n}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MAIN
-# ══════════════════════════════════════════════════════════════════════════════
+    iguales = len(set(firmas.values())) == 1
+    print(f"\n[verificación] resultados idénticos con 1/2/4 particiones: {'SÍ' if iguales else 'NO'}")
+    _save_json("verificacion_particiones", {"identicos": iguales})
+    print(f"\nResultados en {OUT}")
+    sys.exit(0 if iguales else 1)
+
 
 if __name__ == "__main__":
-    print("Verificando servicios...")
-    try:
-        requests.get(f"{COLLECTOR}/health", timeout=5).raise_for_status()
-        requests.get(f"{SPARK}/health",     timeout=5).raise_for_status()
-        print("  ✓ collector y spark responden")
-    except Exception as e:
-        print(f"  ✗ Error: {e}")
-        print("  Asegúrate de que docker-compose up -d esté corriendo.")
-        exit(1)
-
-    _log_event("session_start", "all_experiments", {"timestamp_iso": datetime.now().isoformat()})
-    t_total = time.perf_counter()
-
-    # Sección 5.1 (3 × delete+collect ≈ 30 min)
-    run_mongodb_timings()
-
-    # Experimentos (la DB tiene datos al finalizar 5.1)
-    run_experiment1()
-    run_experiment2()
-
-    elapsed = time.perf_counter() - t_total
-    _log_event("session_end", "all_experiments", {"elapsed_s": round(elapsed, 1)})
-
-    print(f"\n{'='*60}")
-    print(f"Todos los experimentos completados en {elapsed:.1f}s")
-    print(f"Resultados en: experiments/results/")
-    print(f"  events.jsonl                  ← log corriente")
-    print(f"  mongodb_timings_*.json/.csv   ← Sección 5.1")
-    print(f"  exp1_vary_data_*.json/.csv    ← Experimento 1")
-    print(f"  exp2_vary_partitions_*.json/.csv ← Experimento 2")
+    main()
