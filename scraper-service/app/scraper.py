@@ -237,7 +237,7 @@ async def scrape_matches_by_date_range(date_from: str, date_to: str) -> list[dic
 
 # ─── Lógica compartida para scraping con botón "show more" ────────────────────
 
-MORE_TEXTS = ["Mostrar más partidos", "Mostrar más", "Show more matches", "Show more"]
+MORE_TEXTS = ["Mostrar más partidos", "Show more matches"]
 MORE_SELECTORS = ["a.event__more", "div.event__more", "[class*='event__more']"]
 COOKIE_SELECTORS = ["#onetrust-accept-btn-handler", "button:has-text('Acepto')",
                     "button:has-text('Aceptar')", "button:has-text('I Accept')"]
@@ -289,8 +289,6 @@ async def _scrape_extended_from_url(
             if btn is None:
                 break
             try:
-                html = (await btn.evaluate("el => el.outerHTML"))[:200]
-                print(f"[scraper] click {clicks + 1} en: {html}", flush=True)
                 await btn.scroll_into_view_if_needed()
                 await btn.click(timeout=5_000)
             except Exception:
@@ -311,10 +309,6 @@ async def _scrape_extended_from_url(
                 break
 
         print(f"[scraper] {url} clicks={clicks} filas={n_rows}", flush=True)
-        try:
-            await page.screenshot(path=f"/tmp/{url.rstrip('/').split('/')[-2]}.png", full_page=True)
-        except Exception:
-            pass
 
         all_matches: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
