@@ -1,5 +1,5 @@
 {
-  "_comment": "slug e id confirmados navegando cl.soccerway.com (2026-09-01). URL real de equipo: /equipo/{slug}/{id}/",
+  "_comment": "slug e id confirmados navegando cl.soccerway.com (2026-09-01). URL real de equipo: /equipo/{slug}/{id}/. 'aliases' mapea variantes de nombre -> nombre canónico (usado por Spark en la normalización). Agregar aquí cualquier variante nueva que aparezca en el reporte de limpieza.",
   "teams": [
     {"code": "udechile",    "name": "U. De Chile",     "slug": "u-de-chile",     "id": "xW771C6U"},
     {"code": "colocolo",    "name": "Colo Colo",       "slug": "colo-colo",      "id": "th4HPIws"},
@@ -17,5 +17,21 @@
     {"code": "huachipato",  "name": "Huachipato",      "slug": "huachipato",     "id": "SlhZpIaP"},
     {"code": "palestino",   "name": "Palestino",       "slug": "palestino",      "id": "U35cjf75"},
     {"code": "cobresal",    "name": "Cobresal",        "slug": "cobresal",       "id": "YeUwzehC"}
-  ]
+  ],
+  "aliases": {
+    "Audax":                  "Audax Italiano",
+    "A. Italiano":            "Audax Italiano",
+    "Wanderers":              "S. Wanderers",
+    "Santiago Wanderers":     "S. Wanderers",
+    "Universidad de Chile":   "U. De Chile",
+    "Universidad Católica":   "U. Católica",
+    "Universidad de Concepción": "U. De Concepción",
+    "Unión Española":         "U. Española",
+    "Unión La Calera":        "U. La Calera",
+    "Deportes Antofagasta":   "Antofagasta",
+    "Iquique":                "Deportes Iquique",
+    "Coquimbo Unido":         "Coquimbo",
+    "Deportes Copiapó":       "Copiapó",
+    "Deportes La Serena":     "La Serena"
+  }
 }

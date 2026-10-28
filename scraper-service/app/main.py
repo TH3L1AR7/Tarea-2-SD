@@ -1,3 +1,5 @@
+import json
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException
@@ -14,24 +16,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Scraper Service", lifespan=lifespan)
 
-TEAMS = [
-    {"slug": "u-de-chile",      "id": "xW771C6U"},
-    {"slug": "colo-colo",       "id": "th4HPIws"},
-    {"slug": "coquimbo",        "id": "hWejMZ6h"},
-    {"slug": "u-de-concepcion", "id": "6BcMMext"},
-    {"slug": "limache",         "id": "YPTUuyqJ"},
-    {"slug": "nublense",        "id": "vVvwgdNn"},
-    {"slug": "dep-concepcion",  "id": "GKJrZE7I"},
-    {"slug": "a-italiano",      "id": "rN3Jxc8g"},
-    {"slug": "everton",         "id": "Kr3LOxgm"},
-    {"slug": "u-catolica",      "id": "Qe432hiO"},
-    {"slug": "la-serena",       "id": "d6kYgx8t"},
-    {"slug": "o-higgins",       "id": "hYrshGxg"},
-    {"slug": "u-la-calera",     "id": "M34g8ulJ"},
-    {"slug": "huachipato",      "id": "SlhZpIaP"},
-    {"slug": "palestino",       "id": "U35cjf75"},
-    {"slug": "cobresal",        "id": "YeUwzehC"},
-]
+TEAMS_FILE = os.getenv("TEAMS_FILE", "/shared/teams.json")
+
+
+def _load_teams() -> list[dict]:
+    """Lista de equipos desde shared/teams.json (única fuente de verdad)."""
+    with open(TEAMS_FILE, encoding="utf-8") as f:
+        return [{"slug": t["slug"], "id": t["id"]} for t in json.load(f)["teams"]]
+
+
+TEAMS = _load_teams()
 
 
 class ScrapeRequest(BaseModel):
