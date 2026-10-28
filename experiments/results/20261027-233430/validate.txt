@@ -1,0 +1,41 @@
+
+=== 1 partición(es) ===
+  [OK] descartes por regla
+  [OK] Q1 PJ/V/E/D
+  [OK] Q2 GF/GC/DG
+  [OK] Q3 PTS/%V/prom
+  [OK] Q4 distribución
+  [OK] Q5 promedio goles
+  [OK] Q6 por temporada
+  [OK] Q6 por mes
+  [OK] Q7 top GF
+  [OK] Q8 partido con más goles
+
+=== 2 partición(es) ===
+  [OK] descartes por regla
+  [OK] Q1 PJ/V/E/D
+  [OK] Q2 GF/GC/DG
+  [OK] Q3 PTS/%V/prom
+  [OK] Q4 distribución
+  [OK] Q5 promedio goles
+  [OK] Q6 por temporada
+  [OK] Q6 por mes
+  [OK] Q7 top GF
+  [OK] Q8 partido con más goles
+
+=== 4 partición(es) ===
+  [OK] descartes por regla
+  [OK] Q1 PJ/V/E/D
+  [OK] Q2 GF/GC/DG
+  [OK] Q3 PTS/%V/prom
+  [OK] Q4 distribución
+  [OK] Q5 promedio goles
+  [OK] Q6 por temporada
+  [OK] Q6 por mes
+  [OK] Q7 top GF
+  [OK] Q8 partido con más goles
+
+=== Invariancia respecto a particiones ===
+  [OK] resultados idénticos con 1, 2 y 4 particiones
+
+TODO OK
