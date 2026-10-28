@@ -1,23 +1,3 @@
-"""
-Collector Service — Recolección + Ingesta en MongoDB (pasos 1 y 2 del flujo).
-
-Flujo:
-  POST /collect   -> raspa las temporadas de la Liga de Primera vía scraper-service,
-                     guarda un snapshot JSON de lo raspado y lo ingesta en MongoDB.
-  POST /reingest  -> borra la colección y vuelve a insertar el último snapshot
-                     (para medir escritura 3+ veces SIN volver a raspar Soccerway).
-
-Decisiones:
-  - Solo se usan páginas de liga (liga-de-primera[-AAAA]/resultados/): todo lo que
-    entra es Primera División y la temporada sale de la URL. Las páginas por equipo
-    (Q6 de la T1) mezclan Copa Libertadores / Sudamericana / Copa Chile.
-  - En MongoDB se guardan los datos CRUDOS: también partidos programados/suspendidos.
-    Spark decide qué usar en cada análisis (enunciado 4.3: no eliminar incompletos
-    indiscriminadamente). Solo se descartan registros no identificables.
-  - Deduplicación: _id = match_id (índice único implícito) + índice único en match_id.
-  - Inserción: insert_many(ordered=False) en lote; los duplicados (E11000) se cuentan.
-"""
-
 import asyncio
 import json
 import os
@@ -38,9 +18,8 @@ SNAPSHOT_PATH = Path(os.getenv("SNAPSHOT_PATH", "/data/raw_snapshot.json"))
 MAX_CLICKS    = int(os.getenv("MAX_CLICKS", "60"))
 
 BASE = "https://cl.soccerway.com/chile"
-# Temporada actual (sin sufijo) + históricas. VERIFICAR que cada URL exista en Soccerway.
 SEASON_URLS = [f"{BASE}/liga-de-primera/resultados/"] + [
-    f"{BASE}/liga-de-primera-{y}/resultados/" for y in range(2025, 2018, -1)
+    f"{BASE}/liga-de-primera-{y}/resultados/" for y in range(2025, 2016, -1)
 ]
 
 _client: AsyncIOMotorClient = None
@@ -61,8 +40,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Collector Service", lifespan=lifespan)
 
 
-# ─── helpers ──────────────────────────────────────────────────────────────────
-
 async def _scrape_season(http: httpx.AsyncClient, season_url: str) -> list[dict]:
     payload = {"query_type": "Q7", "params": {"season_url": season_url, "max_clicks": MAX_CLICKS}}
     resp = await http.post(f"{SCRAPER_URL}/scrape", json=payload, timeout=900)
@@ -71,8 +48,6 @@ async def _scrape_season(http: httpx.AsyncClient, season_url: str) -> list[dict]
 
 
 def _motivo_descarte(m: dict) -> str | None:
-    """Solo se descarta lo que no se puede identificar ni asociar a equipos.
-    Todo lo demás se guarda crudo y lo filtra Spark."""
     if not m.get("match_id"):
         return "sin_match_id"
     if not m.get("equipo_local") or not m.get("equipo_visitante"):
@@ -81,7 +56,6 @@ def _motivo_descarte(m: dict) -> str | None:
 
 
 def _preparar(matches: list[dict]) -> tuple[list[dict], dict, int]:
-    """Valida y deduplica dentro del lote. Retorna (docs, descartados_por_motivo, dup_lote)."""
     docs, seen = [], set()
     descartados: dict[str, int] = {}
     dup_lote = 0
@@ -100,7 +74,6 @@ def _preparar(matches: list[dict]) -> tuple[list[dict], dict, int]:
 
 
 async def _insertar(docs: list[dict]) -> tuple[int, int, float]:
-    """insert_many sin orden: sigue aunque haya duplicados. Retorna (insertados, dup_db, t_seg)."""
     if not docs:
         return 0, 0, 0.0
     t0 = time.perf_counter()
@@ -137,8 +110,6 @@ async def _ingestar(matches: list[dict]) -> dict:
     }
 
 
-# ─── endpoints ────────────────────────────────────────────────────────────────
-
 @app.get("/health")
 async def health():
     return {"status": "ok", "db": DB_NAME, "collection": COLLECTION}
@@ -164,7 +135,6 @@ async def delete_all():
 
 @app.post("/collect")
 async def collect():
-    """Paso 1 + 2: raspa todas las temporadas, guarda snapshot e ingesta."""
     errors: list[dict] = []
     por_temporada: dict[str, int] = {}
     all_matches: list[dict] = []
@@ -195,7 +165,6 @@ async def collect():
 
 @app.post("/reingest")
 async def reingest():
-    """Borra la colección e inserta el último snapshot (medición 5.1 sin re-raspar)."""
     if not SNAPSHOT_PATH.exists():
         raise HTTPException(404, "No hay snapshot. Ejecuta POST /collect primero.")
     matches = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
