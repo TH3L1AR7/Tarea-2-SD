@@ -259,3 +259,10 @@ Spark corre en `local[4]` (4 hilos) para que 4 particiones puedan ejecutarse en 
 | `t_limpieza` | Reglas R1–R6 incluyendo los `count()` del reporte. |
 | `t_cache` | Submuestreo + repartition + materialización de caches. |
 | `timings_queries_seg.qX` | Cada consulta por separado con datos ya en memoria (cómputo puro). |
+
+## Uso de herramientas de IA
+
+Como en la Tarea 1, se utilizó **Claude** (Anthropic) como herramienta de apoyo para el desarrollo y la depuración del proyecto:
+
+- **Desarrollo:** apoyo en la escritura y revisión del código (scraper, collector, pipeline de Spark, validación y script de experimentos) y de los archivos de despliegue.
+- **Depuración:** diagnóstico de errores, por ejemplo el botón "Mostrar más partidos" que no cargaba filas, las fechas sin año, los nombres de equipos inconsistentes y problemas de Docker y Git.
