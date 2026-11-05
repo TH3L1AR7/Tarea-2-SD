@@ -20,7 +20,6 @@ TEAMS_FILE = os.getenv("TEAMS_FILE", "/shared/teams.json")
 
 
 def _load_teams() -> list[dict]:
-    """Lista de equipos desde shared/teams.json (única fuente de verdad)."""
     with open(TEAMS_FILE, encoding="utf-8") as f:
         return [{"slug": t["slug"], "id": t["id"]} for t in json.load(f)["teams"]]
 

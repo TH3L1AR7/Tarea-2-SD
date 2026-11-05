@@ -1,15 +1,3 @@
-"""
-Spark Service — pasos 3 a 7 del flujo (carga, limpieza, contribuciones, consultas,
-persistencia de resultados).
-
-Límites de medición (ver README / informe):
-  t_mongo_read     : find() completo en MongoDB -> lista en el driver (E/S de red + deserialización BSON)
-  t_rdd_load       : parallelize + count del RDD crudo (serialización driver -> executors)
-  t_limpieza       : reglas de limpieza con conteo por etapa (incluye los count() del reporte)
-  t_cache          : submuestreo + repartition + materializar cache de partidos y contribuciones
-  timings[qX]      : cada consulta por separado, ya con los RDD en memoria (cómputo puro)
-"""
-
 import json
 import os
 import time
@@ -52,7 +40,6 @@ app = FastAPI(title="Spark Service", lifespan=lifespan)
 
 
 def _read_mongo() -> tuple[list[dict], float]:
-    """Lee la colección cruda completa. Proyección sin _id (no serializable por Spark)."""
     client = MongoClient(MONGO_URI)
     try:
         t0 = time.perf_counter()
@@ -76,7 +63,6 @@ def health():
 
 @app.post("/read-benchmark")
 def read_benchmark():
-    """Sección 5.1: tiempo de lectura MongoDB -> Spark (sin consultas)."""
     docs, t_read = _read_mongo()
     t0 = time.perf_counter()
     n = _sc.parallelize(docs, 1).count()
@@ -92,17 +78,11 @@ def analyze(
     seed: int              = Query(default=None),
     persist: bool          = Query(default=True, description="Guardar resultados en MongoDB"),
 ):
-    """Ejecuta limpieza + 8 consultas.
-
-    - sample_fraction: fracción del dataset LIMPIO (submuestreo en Spark con rdd.sample)
-    - partitions: particiones del RDD (rdd.repartition(n) sobre el RDD limpio)
-    """
     fraction = SAMPLE_FRACTION if sample_fraction is None else sample_fraction
     n_parts  = SPARK_PARTITIONS if partitions is None else partitions
     seed     = SAMPLE_SEED if seed is None else seed
     t_start  = time.perf_counter()
 
-    # Paso 3 – Carga
     docs, t_mongo_read = _read_mongo()
     if not docs:
         raise HTTPException(404, "No hay partidos en MongoDB. Ejecuta POST /collect en el collector.")
@@ -111,10 +91,8 @@ def analyze(
     raw.count()
     t_rdd_load = time.perf_counter() - t0
 
-    # Paso 4 – Limpieza distribuida
     (limpio, reporte), t_limpieza = _timed(pipeline.limpiar, raw, _alias_bc)
 
-    # Submuestreo + particionamiento + cache (paso 5: contribuciones)
     t0 = time.perf_counter()
     dataset = limpio if fraction >= 1.0 else limpio.sample(False, fraction, seed)
     if n_parts > 1:
@@ -126,7 +104,6 @@ def analyze(
     t_cache = time.perf_counter() - t0
     raw.unpersist()
 
-    # Paso 6 – Consultas (cada una medida por separado, con datos ya en memoria)
     fuentes = {"partidos": partidos, "contrib": contrib}
     resultados, timings = {}, {}
     for nombre, fuente, fn in pipeline.QUERIES:
@@ -153,7 +130,6 @@ def analyze(
         "timings_queries_seg": timings,
     }
 
-    # Paso 7 – Persistencia en colección separada (los datos crudos no se tocan)
     if persist:
         client = MongoClient(MONGO_URI)
         try:

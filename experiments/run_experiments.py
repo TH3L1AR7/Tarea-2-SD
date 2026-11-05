@@ -1,23 +1,3 @@
-"""
-Experimentos Tarea 2 - Sistemas Distribuidos
-============================================
-Uso (con `docker compose up -d --build` corriendo):
-
-    pip install requests matplotlib        # matplotlib es opcional (gráficos)
-    python experiments/run_experiments.py               # raspa 1 vez + todo
-    python experiments/run_experiments.py --skip-collect  # usa el snapshot ya raspado
-
-Qué hace:
-  0. (opcional) POST /collect: raspa Soccerway UNA sola vez y guarda snapshot.
-  1. Sección 5.1: REPS x (reingesta completa en MongoDB) y REPS x (lectura MongoDB -> RDD).
-  2. Warm-up: 1 ejecución descartada (arranque de JVM / workers Python).
-  3. Experimento 1: N, N/2, N/4 con 1 partición, REPS repeticiones cada uno.
-  4. Experimento 2: 1, 2, 4 particiones con N completo, REPS repeticiones cada uno.
-  5. Verifica que los resultados sean idénticos entre particiones.
-
-Salida en experiments/results/<timestamp>/ : JSON crudo, CSV resumen y PNG.
-"""
-
 import argparse
 import csv
 import json
@@ -63,8 +43,6 @@ def analyze(fraction, parts):
     return _post(f"{SPARK}/analyze", params={"sample_fraction": fraction, "partitions": parts})
 
 
-# ─── Sección 5.1 ─────────────────────────────────────────────────────────────
-
 def mongodb_timings():
     print("\n=== 5.1 MongoDB: escritura y lectura ===")
     writes, reads = [], []
@@ -85,8 +63,6 @@ def mongodb_timings():
     _save_csv("sec51_mongodb", rows)
     return rows
 
-
-# ─── Experimentos Spark ──────────────────────────────────────────────────────
 
 def experimento(nombre, configs):
     print(f"\n=== {nombre} ===")

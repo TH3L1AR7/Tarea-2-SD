@@ -1,14 +1,3 @@
-"""
-Validación de corrección (sección "Consultas analíticas" del enunciado).
-
-Usa un conjunto pequeño de partidos con resultados conocidos (incluye registros
-sucios a propósito), calcula a mano las métricas esperadas y las compara con lo
-que produce Spark con 1, 2 y 4 particiones. No necesita MongoDB.
-
-Uso (dentro del contenedor):
-    docker compose exec spark-service python -m app.validate
-"""
-
 import json
 import sys
 
@@ -21,9 +10,7 @@ ALIAS = pipeline.build_alias_map({
     "aliases": {"Universidad Católica": "U. Católica"},
 })
 
-# A = Colo Colo, B = U. De Chile, C = U. Católica
 PARTIDOS = [
-    # válidos
     {"match_id": "m1", "fecha": "2024-03-01", "temporada": "2024", "estado": "finalizado",
      "equipo_local": "Colo Colo", "equipo_visitante": "U. De Chile", "goles_local": 2, "goles_visitante": 1},
     {"match_id": "m2", "fecha": "2024-03-08", "temporada": "2024", "estado": "finalizado",
@@ -34,25 +21,22 @@ PARTIDOS = [
      "equipo_local": "U. Católica", "equipo_visitante": "U. De Chile", "goles_local": 1, "goles_visitante": 4},
     {"match_id": "m5", "fecha": None, "temporada": "2025", "estado": "finalizado",
      "equipo_local": "Colo Colo", "equipo_visitante": "U. Católica", "goles_local": 0, "goles_visitante": 1},
-    # sucios: deben descartarse
-    {"match_id": "m1", "fecha": "2024-03-01", "temporada": "2024", "estado": "finalizado",       # dup id
+    {"match_id": "m1", "fecha": "2024-03-01", "temporada": "2024", "estado": "finalizado",
      "equipo_local": "Colo Colo", "equipo_visitante": "U. De Chile", "goles_local": 2, "goles_visitante": 1},
-    {"match_id": "m1b", "fecha": "2024-03-01", "temporada": "2024", "estado": "finalizado",      # dup clave natural
+    {"match_id": "m1b", "fecha": "2024-03-01", "temporada": "2024", "estado": "finalizado",
      "equipo_local": "Colo Colo", "equipo_visitante": "U. De Chile", "goles_local": 2, "goles_visitante": 1},
-    {"match_id": "x1", "fecha": "2025-05-01", "temporada": "2025", "estado": "programado",       # no finalizado
+    {"match_id": "x1", "fecha": "2025-05-01", "temporada": "2025", "estado": "programado",
      "equipo_local": "Colo Colo", "equipo_visitante": "U. De Chile", "goles_local": None, "goles_visitante": None},
-    {"match_id": "x2", "fecha": "2025-05-02", "temporada": "2025", "estado": "suspendido",       # no finalizado
+    {"match_id": "x2", "fecha": "2025-05-02", "temporada": "2025", "estado": "suspendido",
      "equipo_local": "U. De Chile", "equipo_visitante": "U. Católica", "goles_local": 1, "goles_visitante": 0},
-    {"match_id": "x3", "fecha": "2025-05-03", "temporada": "2025", "estado": "finalizado",       # marcador inválido
+    {"match_id": "x3", "fecha": "2025-05-03", "temporada": "2025", "estado": "finalizado",
      "equipo_local": "U. Católica", "equipo_visitante": "Colo Colo", "goles_local": None, "goles_visitante": 2},
-    {"match_id": "x4", "fecha": "2025-05-04", "temporada": "2025", "estado": "finalizado",       # sin visitante
+    {"match_id": "x4", "fecha": "2025-05-04", "temporada": "2025", "estado": "finalizado",
      "equipo_local": "Colo Colo", "equipo_visitante": None, "goles_local": 1, "goles_visitante": 0},
-    {"match_id": "x5", "fecha": "2025-05-05", "temporada": "2025", "estado": "finalizado",       # goles negativos
+    {"match_id": "x5", "fecha": "2025-05-05", "temporada": "2025", "estado": "finalizado",
      "equipo_local": "Colo Colo", "equipo_visitante": "U. Católica", "goles_local": -1, "goles_visitante": 0},
 ]
 
-# ── Esperado, calculado a mano ───────────────────────────────────────────────
-# m1 CC 2-1 UCh | m2 UCh 0-0 UC | m3 UC 3-3 CC | m4 UC 1-4 UCh | m5 CC 0-1 UC
 ESPERADO = {
     "descartes": {"sin_campos_esenciales": 1, "no_finalizados": 2, "resultado_invalido": 2,
                   "mismo_equipo": 0, "duplicado_match_id": 1, "duplicado_clave_natural": 1},
@@ -66,9 +50,9 @@ ESPERADO = {
            "U. De Chile": {"PTS": 4, "pct_victorias": 33.33, "prom_puntos_partido": 1.333},
            "U. Católica": {"PTS": 5, "pct_victorias": 25.0,  "prom_puntos_partido": 1.25}},
     "q4": {"victoria_local": 1, "empate": 2, "victoria_visitante": 2},
-    "q5": 3.0,   # (3+0+6+5+1)=15 goles / 5 partidos
+    "q5": 3.0,
     "q6_temporada": {"2024": 3, "2025": 2},
-    "q6_mes": {"2024-03": 2, "2024-04": 1, "2025-02": 1},   # m5 sin fecha no cuenta por mes
+    "q6_mes": {"2024-03": 2, "2024-04": 1, "2025-02": 1},
     "q7_top1_gf": 5,
     "q8_top": ("m3", 6),
 }
