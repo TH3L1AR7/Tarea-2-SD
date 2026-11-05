@@ -266,3 +266,17 @@ Como en la Tarea 1, se utilizó **Claude** (Anthropic) como herramienta de apoyo
 
 - **Desarrollo:** apoyo en la escritura y revisión del código (scraper, collector, pipeline de Spark, validación y script de experimentos) y de los archivos de despliegue.
 - **Depuración:** diagnóstico de errores, por ejemplo el botón "Mostrar más partidos" que no cargaba filas, las fechas sin año, los nombres de equipos inconsistentes y problemas de Docker y Git.
+
+
+## Historial de Git
+
+Por un `push --force` accidental se perdió parte del historial. Los commits iniciales (20 al 24 de octubre) se restauraron, y el commit `275436f` (27/10) consolida el estado del proyecto en ese momento. Los commits posteriores muestran las correcciones, la validación y los experimentos.
+
+## Contribución por integrante
+
+El desarrollo del código (scraper, collector, pipeline de Spark, validación y experimentos) se realizó en conjunto entre ambos integrantes. A pesar de que todos los commits vienen desde Benjamin, el trabajo y aporte de Lucas fue sustancial en el desarrollo.
+
+| Integrante | Participación |
+|---|---|
+| Benjamín Casanova | Desarrollo conjunto del código; realizó todos los commits. |
+| Lucas Echeverría | Desarrollo conjunto del código; no realizó commits. |
